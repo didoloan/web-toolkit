@@ -1,0 +1,17 @@
+[package]
+name = "web-toolkit"
+version = "0.1.0"
+edition = "2021"
+authors = ["Doyin <didoloan@gmail.com>"]
+description = "A library providing some useful tools for backend web development."
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+argon2 = "0.5.0"
+serde = "1.0.152"
+serde_derive = "1.0.152"
+serde_json = "1.0.91"
+rand_core = { version = "0.6.4", features = ["std"] }
+openssl = "0.10.45"
+jwt-simple = "0.11.2"
