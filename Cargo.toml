@@ -1,6 +1,6 @@
 [package]
 name = "web-toolkit"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Doyin <didoloan@gmail.com>"]
 description = "A library providing some useful tools for backend web development."

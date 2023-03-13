@@ -8,7 +8,7 @@ pub mod hasher {
         Argon2
     };
 
-    pub fn hash(passwd:String) -> Result<String, Error> {
+    pub fn hash(passwd:&str) -> Result<String, Error> {
         let salt:SaltString = SaltString::generate(&mut OsRng);
         let argon:Argon2 = Argon2::default();
         match argon.hash_password(passwd.as_bytes(), &salt) {
@@ -34,11 +34,42 @@ pub mod jwt {
     const PRIVATE:&str = "private_key.pem";
     const PUBLIC:&str = "public_key.pem";
     
-    use std::{result::Result::Ok, str::FromStr, fmt::Display};
+    use std::{result::Result::Ok, str::FromStr, fmt::Display, collections::HashSet};
     use openssl::pkey::{PKey, Private};
-    use std::{io::{Error, ErrorKind}, fs, path::Path, sync::Arc};
-    use jwt_simple::{prelude::{Ed25519KeyPair,Claims, VerificationOptions, Ed25519PublicKey, NoCustomClaims, EdDSAPublicKeyLike, Duration, EdDSAKeyPairLike}};
+    use std::{io::{Error, ErrorKind}, fs, path::Path};
+    use jwt_simple::{prelude::{Ed25519KeyPair,Claims, VerificationOptions, Ed25519PublicKey, NoCustomClaims, EdDSAPublicKeyLike, Duration, EdDSAKeyPairLike, JWTClaims}};
 
+    pub struct SignOptions<'a, T:ToString> {
+        pub issuer: Option<&'a str>,
+        pub expiry: Option<Duration>,
+        pub audience: Option<T>
+    }
+
+    #[derive(Default)]
+    pub struct VerifyOptions {
+        pub valid_audiences: Option<HashSet<String>>,
+        pub valid_issuers: Option<HashSet<String>>,
+        pub valid_after_expiry: Option<Duration>
+    }
+
+    impl<'a, T:ToString+Copy> SignOptions<'a, T> {
+        fn get_claim(&self) -> JWTClaims<NoCustomClaims> {
+            let mut claim = Claims::create(match self.expiry {
+                Some(exp) => exp,
+                None => std::time::Duration::MAX.into()
+            });
+
+            claim = match self.audience {
+                Some(audience) => claim.with_audience(audience),
+                None => claim,
+            };
+
+            match self.issuer {
+                Some(iss) => claim.with_issuer(iss),
+                None => claim
+            }
+        }
+    }
 
     pub fn generate_key_pair_if_absent() -> Result<(), Error> {
 
@@ -93,7 +124,7 @@ pub mod jwt {
     }
 
 
-    pub fn get_keys_as_str() -> Result<Arc<(String,String)>, Error> {
+    pub fn get_keys_as_str() -> Result<(String,String), Error> {
         let pub_bytes = match fs::read(Path::new("public_key.pem")) {
             Ok(bts) => bts,
             Err(e) => {return Err(Error::new(ErrorKind::Other, e.to_string()));}
@@ -104,20 +135,18 @@ pub mod jwt {
             Err(e) => {return Err(Error::new(ErrorKind::Other, e.to_string()));}
         };
 
-        Ok(Arc::new((String::from_utf8(priv_bytes).unwrap(),String::from_utf8(pub_bytes).unwrap())))
+        Ok((String::from_utf8(priv_bytes).unwrap(),String::from_utf8(pub_bytes).unwrap()))
     }
 
-    pub fn sign<T:ToString>(aud:Option<T>, pem_str:&str, expiry_in_secs:u64) -> Result<String, Error> {
+    pub fn sign<T:ToString+Copy>(pem_str:&str, options:SignOptions<T>) -> Result<String, Error> {
         let key_pair = match Ed25519KeyPair::from_pem(pem_str) {
             Ok(pair) => pair,
             Err(e) => {
                 return Err(Error::new(ErrorKind::Other, e.to_string()))
             }
         };
-        let claim =match aud.is_some() {
-            true => Claims::create(Duration::from_secs(expiry_in_secs)).with_audience(aud.unwrap()),
-            false => Claims::create(Duration::from_secs(expiry_in_secs))
-        };
+
+        let claim = options.get_claim();
 
         match key_pair.sign(claim) {
             Ok(token) => Ok(token),
@@ -125,12 +154,12 @@ pub mod jwt {
         }
     }
 
-    pub fn verify<T>(token:&str, pub_pem_str:&str) -> Result<T, Error>
+    pub fn verify<T>(token:&str, pub_pem_str:&str, options:VerifyOptions) -> Result<T, Error>
     where 
     <T as FromStr>::Err:Display,
     T:FromStr
     {
-        let opts:VerificationOptions = VerificationOptions { time_tolerance: Some(Duration::from_secs(60u64)), ..Default::default() };
+        let opts:VerificationOptions = VerificationOptions { accept_future:false, time_tolerance: options.valid_after_expiry, allowed_issuers: options.valid_issuers, allowed_audiences: options.valid_audiences, ..Default::default() };
         let pub_key = match Ed25519PublicKey::from_pem(pub_pem_str) {
             Ok(key) => key,
             Err(e) => {return Err(Error::new(ErrorKind::Other, e.to_string()))}
